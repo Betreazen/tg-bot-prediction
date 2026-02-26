@@ -1,0 +1,18 @@
+# Telegram Bot Framework
+aiogram==3.4.1
+
+# Database
+SQLAlchemy[asyncio]==2.0.25
+asyncpg==0.29.0
+alembic==1.13.1
+
+# Scheduler
+APScheduler==3.10.4
+
+# Configuration
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+
+# Timezone
+pytz==2024.1

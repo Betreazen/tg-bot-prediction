@@ -1,0 +1,36 @@
+services:
+  bot:
+    build: .
+    container_name: tg-bot-prediction
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+    volumes:
+      - ./logs:/app/logs
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tg-bot-prediction-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-prediction_bot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-prediction_bot_password}
+      POSTGRES_DB: ${DB_NAME:-prediction_bot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-prediction_bot} -d ${DB_NAME:-prediction_bot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
