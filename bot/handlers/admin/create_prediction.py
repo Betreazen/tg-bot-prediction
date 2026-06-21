@@ -1,15 +1,13 @@
 """Admin prediction creation FSM handler."""
 
 import logging
-from datetime import datetime, date
+from datetime import datetime
 
-import pytz
-from aiogram import Router, F, Bot
+from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config.settings import settings
 from bot.services.prediction_service import PredictionService
 from bot.services.user_service import UserService
 from bot.keyboards.admin import (
@@ -21,9 +19,15 @@ from bot.keyboards.admin import (
 )
 from bot.db.models import MediaType
 from bot.states.admin import CreatePredictionState
+from bot.utils.timezone import get_tz, tz_label
+from bot.utils.telegram import safe_edit_text
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_create_prediction")
+
+# Telegram limits: inline button text is short; a media caption is max 1024 chars.
+MAX_BUTTON_LEN = 64
+MAX_CAPTION_LEN = 1024
 
 
 # Step 1: Start creation - ask for media
@@ -35,12 +39,12 @@ async def start_prediction_creation(
     """Start the prediction creation flow."""
     await state.clear()
     await state.set_state(CreatePredictionState.waiting_for_media)
-    
-    await callback.message.edit_text(
+
+    await safe_edit_text(
+        callback,
         "📷 <b>Шаг 1/7: Загрузка медиа</b>\n\n"
         "Отправьте фото, видео, GIF или анимацию для предсказания.",
         reply_markup=get_cancel_keyboard(),
-        parse_mode="HTML",
     )
     await callback.answer()
 
@@ -99,7 +103,15 @@ async def process_text(
             reply_markup=get_cancel_keyboard(),
         )
         return
-    
+
+    if len(message.text) > MAX_CAPTION_LEN:
+        await message.answer(
+            f"❌ Текст слишком длинный ({len(message.text)} символов). "
+            f"Максимум для подписи к медиа — {MAX_CAPTION_LEN}.",
+            reply_markup=get_cancel_keyboard(),
+        )
+        return
+
     await state.update_data(post_text=message.text)
     await state.set_state(CreatePredictionState.waiting_for_button_1_initial)
     
@@ -122,7 +134,15 @@ async def process_button_1_initial(
     if not message.text:
         await message.answer("❌ Отправьте текст.", reply_markup=get_cancel_keyboard())
         return
-    
+
+    if len(message.text) > MAX_BUTTON_LEN:
+        await message.answer(
+            f"❌ Текст кнопки слишком длинный ({len(message.text)} символов). "
+            f"Максимум — {MAX_BUTTON_LEN}.",
+            reply_markup=get_cancel_keyboard(),
+        )
+        return
+
     await state.update_data(button_1_initial=message.text)
     await state.set_state(CreatePredictionState.waiting_for_button_2_initial)
     
@@ -143,7 +163,15 @@ async def process_button_2_initial(
     if not message.text:
         await message.answer("❌ Отправьте текст.", reply_markup=get_cancel_keyboard())
         return
-    
+
+    if len(message.text) > MAX_BUTTON_LEN:
+        await message.answer(
+            f"❌ Текст кнопки слишком длинный ({len(message.text)} символов). "
+            f"Максимум — {MAX_BUTTON_LEN}.",
+            reply_markup=get_cancel_keyboard(),
+        )
+        return
+
     await state.update_data(button_2_initial=message.text)
     await state.set_state(CreatePredictionState.waiting_for_button_3_initial)
     
@@ -164,7 +192,15 @@ async def process_button_3_initial(
     if not message.text:
         await message.answer("❌ Отправьте текст.", reply_markup=get_cancel_keyboard())
         return
-    
+
+    if len(message.text) > MAX_BUTTON_LEN:
+        await message.answer(
+            f"❌ Текст кнопки слишком длинный ({len(message.text)} символов). "
+            f"Максимум — {MAX_BUTTON_LEN}.",
+            reply_markup=get_cancel_keyboard(),
+        )
+        return
+
     await state.update_data(button_3_initial=message.text)
     await state.set_state(CreatePredictionState.waiting_for_button_1_final)
     
@@ -187,7 +223,15 @@ async def process_button_1_final(
     if not message.text:
         await message.answer("❌ Отправьте текст.", reply_markup=get_cancel_keyboard())
         return
-    
+
+    if len(message.text) > MAX_BUTTON_LEN:
+        await message.answer(
+            f"❌ Текст кнопки слишком длинный ({len(message.text)} символов). "
+            f"Максимум — {MAX_BUTTON_LEN}.",
+            reply_markup=get_cancel_keyboard(),
+        )
+        return
+
     await state.update_data(button_1_final=message.text)
     await state.set_state(CreatePredictionState.waiting_for_button_2_final)
     
@@ -208,7 +252,15 @@ async def process_button_2_final(
     if not message.text:
         await message.answer("❌ Отправьте текст.", reply_markup=get_cancel_keyboard())
         return
-    
+
+    if len(message.text) > MAX_BUTTON_LEN:
+        await message.answer(
+            f"❌ Текст кнопки слишком длинный ({len(message.text)} символов). "
+            f"Максимум — {MAX_BUTTON_LEN}.",
+            reply_markup=get_cancel_keyboard(),
+        )
+        return
+
     await state.update_data(button_2_final=message.text)
     await state.set_state(CreatePredictionState.waiting_for_button_3_final)
     
@@ -229,7 +281,15 @@ async def process_button_3_final(
     if not message.text:
         await message.answer("❌ Отправьте текст.", reply_markup=get_cancel_keyboard())
         return
-    
+
+    if len(message.text) > MAX_BUTTON_LEN:
+        await message.answer(
+            f"❌ Текст кнопки слишком длинный ({len(message.text)} символов). "
+            f"Максимум — {MAX_BUTTON_LEN}.",
+            reply_markup=get_cancel_keyboard(),
+        )
+        return
+
     await state.update_data(button_3_final=message.text)
     await state.set_state(CreatePredictionState.waiting_for_date)
     
@@ -262,13 +322,13 @@ async def process_date_selection(
     
     await state.update_data(selected_date=date_str)
     await state.set_state(CreatePredictionState.waiting_for_time)
-    
-    await callback.message.edit_text(
+
+    await safe_edit_text(
+        callback,
         f"✅ Дата: {selected_date.strftime('%d.%m.%Y')}\n\n"
         "🕐 <b>Шаг 5/7: Время публикации</b>\n\n"
-        "Выберите время публикации (GMT+3):",
+        f"Выберите время публикации ({tz_label()}):",
         reply_markup=get_time_selection_keyboard(selected_date),
-        parse_mode="HTML",
     )
     await callback.answer()
 
@@ -293,7 +353,7 @@ async def process_time_selection(
     time_str = parts[3].replace("-", ":")
     
     # Combine date and time
-    tz = pytz.timezone(settings.scheduler_timezone)
+    tz = get_tz()
     try:
         dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
         scheduled_at = tz.localize(dt)
@@ -318,15 +378,11 @@ async def process_time_selection(
         f"1️⃣ {data['button_1_final']}\n"
         f"2️⃣ {data['button_2_final']}\n"
         f"3️⃣ {data['button_3_final']}\n\n"
-        f"📅 <b>Публикация:</b> {scheduled_at.strftime('%d.%m.%Y %H:%M')} (GMT+3)\n\n"
+        f"📅 <b>Публикация:</b> {scheduled_at.strftime('%d.%m.%Y %H:%M')} ({tz_label()})\n\n"
         "Подтвердите создание предсказания:"
     )
-    
-    await callback.message.edit_text(
-        preview_text,
-        reply_markup=get_confirm_keyboard(),
-        parse_mode="HTML",
-    )
+
+    await safe_edit_text(callback, preview_text, reply_markup=get_confirm_keyboard())
     await callback.answer()
 
 
@@ -347,11 +403,10 @@ async def confirm_creation(
     # Get admin user
     user_service = UserService(session)
     admin_user = await user_service.get_or_create_user(callback.from_user.id)
-    
-    # Parse scheduled_at
-    tz = pytz.timezone(settings.scheduler_timezone)
+
+    # Parse scheduled_at (timezone-aware ISO string stored during the flow)
     scheduled_at = datetime.fromisoformat(data["scheduled_at"])
-    
+
     # Create prediction
     prediction_service = PredictionService(session)
     prediction = await prediction_service.create_prediction(
@@ -369,15 +424,15 @@ async def confirm_creation(
     )
     
     await state.clear()
-    
-    await callback.message.edit_text(
+
+    await safe_edit_text(
+        callback,
         f"✅ <b>Предсказание создано!</b>\n\n"
         f"ID: {prediction.id}\n"
         f"Статус: {prediction.status.value}\n"
-        f"Запланировано на: {scheduled_at.strftime('%d.%m.%Y %H:%M')} (GMT+3)\n\n"
+        f"Запланировано на: {scheduled_at.strftime('%d.%m.%Y %H:%M')} ({tz_label()})\n\n"
         "Предсказание будет автоматически отправлено всем пользователям в указанное время.",
         reply_markup=get_admin_menu_keyboard(),
-        parse_mode="HTML",
     )
     await callback.answer("✅ Предсказание создано!")
 
@@ -399,8 +454,9 @@ async def cancel_creation(
 ) -> None:
     """Cancel the creation flow."""
     await state.clear()
-    
-    await callback.message.edit_text(
+
+    await safe_edit_text(
+        callback,
         "❌ Создание предсказания отменено.\n\n"
         "Выберите действие:",
         reply_markup=get_admin_menu_keyboard(),

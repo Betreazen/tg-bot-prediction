@@ -1,93 +1,118 @@
 """Scheduler jobs for broadcasting predictions."""
 
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Set
 
-import pytz
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from bot.config.settings import settings
 from bot.db.session import async_session_maker
-from bot.db.models import Prediction, PredictionStatus
+from bot.db.models import PredictionStatus
 from bot.services.prediction_service import PredictionService
 from bot.services.user_service import UserService
 from bot.services.broadcast_service import BroadcastService
 from bot.keyboards.user import get_prediction_keyboard
+from bot.utils.timezone import get_tz, now as tz_now
 
 logger = logging.getLogger(__name__)
 
 # Global scheduler instance
 scheduler: Optional[AsyncIOScheduler] = None
 
+# In-flight broadcasts, to prevent the same prediction being broadcast twice
+# concurrently (e.g. the 1-minute checker firing while a broadcast still runs).
+_broadcasts_in_progress: Set[int] = set()
+
 
 async def broadcast_prediction_job(bot: Bot, prediction_id: int) -> None:
-    """Job to broadcast a scheduled prediction to all users."""
+    """Broadcast a prediction to all users.
+
+    Safe to call for a SCHEDULED prediction (it activates it first) or to resume
+    an ACTIVE prediction whose broadcast was interrupted. Idempotent against
+    concurrent invocations via an in-process guard.
+    """
+    if prediction_id in _broadcasts_in_progress:
+        logger.warning(f"Broadcast for prediction {prediction_id} already in progress, skipping")
+        return
+
+    _broadcasts_in_progress.add(prediction_id)
     logger.info(f"Starting broadcast job for prediction {prediction_id}")
-    
-    async with async_session_maker() as session:
-        try:
-            prediction_service = PredictionService(session)
-            user_service = UserService(session)
-            
-            # Get the prediction
-            prediction = await prediction_service.get_prediction_by_id(prediction_id)
-            
-            if not prediction:
-                logger.error(f"Prediction {prediction_id} not found")
-                return
-            
-            if prediction.status != PredictionStatus.SCHEDULED:
-                logger.warning(
-                    f"Prediction {prediction_id} is not scheduled (status: {prediction.status})"
+
+    try:
+        async with async_session_maker() as session:
+            try:
+                prediction_service = PredictionService(session)
+                user_service = UserService(session)
+
+                prediction = await prediction_service.get_prediction_by_id(prediction_id)
+
+                if not prediction:
+                    logger.error(f"Prediction {prediction_id} not found")
+                    return
+
+                if prediction.broadcast_completed:
+                    logger.info(f"Prediction {prediction_id} already broadcast, skipping")
+                    return
+
+                if prediction.status == PredictionStatus.SCHEDULED:
+                    # First run: activate (archives any current active prediction).
+                    await prediction_service.activate_prediction(prediction)
+                    await session.commit()
+                elif prediction.status == PredictionStatus.ACTIVE:
+                    # Resuming an interrupted broadcast.
+                    logger.info(f"Resuming interrupted broadcast for prediction {prediction_id}")
+                else:
+                    logger.warning(
+                        f"Prediction {prediction_id} not broadcastable (status: {prediction.status})"
+                    )
+                    return
+
+                user_ids = await user_service.get_all_user_telegram_ids()
+
+                if not user_ids:
+                    logger.info("No users to broadcast to")
+                    await prediction_service.mark_broadcast_completed(prediction)
+                    await session.commit()
+                    return
+
+                logger.info(f"Broadcasting to {len(user_ids)} users")
+
+                keyboard = get_prediction_keyboard(prediction)
+                broadcast_service = BroadcastService(bot)
+                result = await broadcast_service.broadcast_prediction(
+                    prediction=prediction,
+                    user_ids=user_ids,
+                    keyboard=keyboard,
                 )
-                return
-            
-            if prediction.broadcast_started and not prediction.broadcast_completed:
-                logger.warning(f"Broadcast for prediction {prediction_id} already in progress")
-                return
-            
-            # Activate the prediction
-            await prediction_service.activate_prediction(prediction)
-            await session.commit()
-            
-            # Get all users
-            user_ids = await user_service.get_all_user_telegram_ids()
-            
-            if not user_ids:
-                logger.info("No users to broadcast to")
+
                 await prediction_service.mark_broadcast_completed(prediction)
                 await session.commit()
-                return
-            
-            logger.info(f"Broadcasting to {len(user_ids)} users")
-            
-            # Create keyboard
-            keyboard = get_prediction_keyboard(prediction)
-            
-            # Broadcast
-            broadcast_service = BroadcastService(bot)
-            result = await broadcast_service.broadcast_prediction(
-                prediction=prediction,
-                user_ids=user_ids,
-                keyboard=keyboard,
-            )
-            
-            # Mark as completed
-            await prediction_service.mark_broadcast_completed(prediction)
-            await session.commit()
-            
-            logger.info(
-                f"Broadcast completed for prediction {prediction_id}: "
-                f"{result['success_count']} success, {result['failure_count']} failed"
-            )
-            
-        except Exception as e:
-            logger.exception(f"Error in broadcast job for prediction {prediction_id}: {e}")
-            await session.rollback()
+
+                logger.info(
+                    f"Broadcast completed for prediction {prediction_id}: "
+                    f"{result['success_count']} success, {result['failure_count']} failed"
+                )
+
+            except Exception as e:
+                logger.exception(f"Error in broadcast job for prediction {prediction_id}: {e}")
+                await session.rollback()
+    finally:
+        _broadcasts_in_progress.discard(prediction_id)
+
+
+async def resume_incomplete_broadcasts(bot: Bot) -> None:
+    """On startup, finish any broadcasts that were interrupted by a restart."""
+    async with async_session_maker() as session:
+        prediction_service = PredictionService(session)
+        incomplete = await prediction_service.get_incomplete_broadcasts()
+
+    for prediction in incomplete:
+        logger.warning(
+            f"Found incomplete broadcast for prediction {prediction.id}, resuming"
+        )
+        await broadcast_prediction_job(bot, prediction.id)
 
 
 async def check_scheduled_predictions(bot: Bot) -> None:
@@ -101,10 +126,9 @@ async def check_scheduled_predictions(bot: Bot) -> None:
             
             if not scheduled:
                 return
-            
-            tz = pytz.timezone(settings.scheduler_timezone)
-            now = datetime.now(tz)
-            
+
+            now = tz_now()
+
             # If scheduled time has passed, broadcast immediately
             if scheduled.scheduled_at <= now:
                 if not scheduled.broadcast_started:
@@ -137,10 +161,8 @@ async def check_scheduled_predictions(bot: Bot) -> None:
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     """Set up and start the scheduler."""
     global scheduler
-    
-    tz = pytz.timezone(settings.scheduler_timezone)
-    
-    scheduler = AsyncIOScheduler(timezone=tz)
+
+    scheduler = AsyncIOScheduler(timezone=get_tz())
     
     # Add a job to check for scheduled predictions every minute
     scheduler.add_job(

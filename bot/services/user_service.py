@@ -16,13 +16,17 @@ class UserService:
         self.session = session
 
     async def get_or_create_user(self, telegram_user_id: int) -> User:
-        """Get existing user or create new one."""
+        """Get existing user or create new one, keeping the admin flag in sync."""
+        is_admin = telegram_user_id in settings.admin_ids_list
+
         user = await self.get_user_by_telegram_id(telegram_user_id)
         if user:
+            # Keep the stored flag consistent with the current ADMIN_IDS config.
+            if user.is_admin != is_admin:
+                user.is_admin = is_admin
+                await self.session.flush()
             return user
 
-        # Create new user
-        is_admin = telegram_user_id in settings.admin_ids_list
         user = User(
             telegram_user_id=telegram_user_id,
             is_admin=is_admin,

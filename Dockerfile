@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code (.dockerignore keeps .env, .git and caches out)
 COPY . .
 
-# Set timezone
-ENV TZ=Europe/Moscow
+# Don't buffer stdout/stderr so `docker logs` shows output immediately
+ENV PYTHONUNBUFFERED=1
 
-# Run the bot
-CMD ["python", "-m", "bot.main"]
+# Default run command. docker-compose overrides this to run DB migrations first.
+CMD ["sh", "-c", "alembic upgrade head && python -m bot.main"]

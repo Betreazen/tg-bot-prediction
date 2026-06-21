@@ -10,62 +10,75 @@ cd tg-bot-prediction
 
 ## 2. Настройка окружения
 
+Единственный шаг настройки — заполнить `.env`:
+
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Заполните переменные:
+Обязательно задайте три параметра:
 
 ```env
 BOT_TOKEN=ваш_токен_от_BotFather
-ADMIN_IDS=ваш_telegram_id
-DB_HOST=db
-DB_PORT=5432
-DB_NAME=prediction_bot
-DB_USER=prediction_bot
-DB_PASSWORD=надежный_пароль
-SCHEDULER_TIMEZONE=Europe/Moscow
-LOG_LEVEL=INFO
+ADMIN_IDS=ваш_telegram_id            # можно несколько через запятую
+DB_PASSWORD=надёжный_случайный_пароль  # например: openssl rand -hex 24
 ```
 
-> **Важно:** `DB_HOST=db` — имя сервиса в docker-compose, не меняйте.
+Остальное менять не нужно. `DB_HOST`/`DB_PORT` подставляются автоматически —
+бот общается с базой по внутренней сети Docker.
 
 ## 3. Запуск
 
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
+
+Миграции базы применяются автоматически при старте — больше никуда заходить не
+нужно.
 
 ## 4. Проверка
 
 ```bash
-docker-compose ps
-docker-compose logs -f bot
+docker compose ps
+docker compose logs -f bot
 ```
 
-## 5. Остановка
+## Запуск нескольких ботов на одном сервере
+
+Стек полностью изолирован: своя сеть, свой том и свои контейнеры с префиксом
+проекта. Порт Postgres на хост **не публикуется**, поэтому конфликтов портов с
+другими ботами нет.
+
+Если нужно поднять несколько копий этого бота на одной машине, задайте каждой
+уникальное имя проекта в её `.env`:
+
+```env
+COMPOSE_PROJECT_NAME=prediction-bot-2
+```
+
+## Остановка
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
-Для полной очистки (включая базу данных):
+Полная очистка вместе с базой данных:
 
 ```bash
-docker-compose down -v
+docker compose down -v
 ```
 
-## 6. Обновление
+## Обновление
 
 ```bash
 git pull
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
-## 7. Просмотр логов
+## Логи
 
 ```bash
-docker-compose logs -f bot
-docker-compose logs -f db
+docker compose logs -f bot
+docker compose logs -f postgres
 ```

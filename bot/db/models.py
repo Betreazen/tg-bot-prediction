@@ -181,6 +181,10 @@ class UserPredictionChoice(Base):
             "month",
             name="uq_user_prediction_choice_per_month",
         ),
+        # Speeds up monthly statistics aggregation (filters by year+month).
+        Index("ix_choices_year_month", "year", "month"),
+        # Speeds up per-prediction statistics aggregation.
+        Index("ix_choices_prediction_id", "prediction_id"),
     )
 
     def __repr__(self) -> str:

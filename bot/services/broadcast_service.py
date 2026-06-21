@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 class BroadcastService:
     """Service for broadcasting predictions to users."""
 
-    # Rate limiting settings
+    # Rate limiting settings. Telegram's global limit is ~30 messages/sec, so we
+    # send each batch concurrently and pause between batches to stay under it.
     BATCH_SIZE = 25
     BATCH_DELAY = 1.0  # seconds between batches
     MAX_RETRIES = 3
@@ -34,7 +35,10 @@ class BroadcastService:
     ) -> dict:
         """
         Broadcast a prediction to all users.
-        
+
+        Sends each batch concurrently for throughput while respecting Telegram's
+        rate limit via a delay between batches.
+
         Returns dict with success_count, failure_count, and errors list.
         """
         success_count = 0
@@ -42,30 +46,35 @@ class BroadcastService:
         errors: List[dict] = []
 
         total_users = len(user_ids)
-        
+
         for i in range(0, total_users, self.BATCH_SIZE):
             batch = user_ids[i:i + self.BATCH_SIZE]
-            
-            for user_id in batch:
-                success = await self._send_to_user(
-                    user_id=user_id,
-                    prediction=prediction,
-                    keyboard=keyboard,
+
+            results = await asyncio.gather(
+                *(
+                    self._send_to_user(
+                        user_id=user_id,
+                        prediction=prediction,
+                        keyboard=keyboard,
+                    )
+                    for user_id in batch
                 )
-                
+            )
+
+            for user_id, success in zip(batch, results):
                 if success:
                     success_count += 1
                 else:
                     failure_count += 1
                     errors.append({"user_id": user_id})
-            
+
             # Report progress
             if on_progress:
                 try:
                     await on_progress(i + len(batch), total_users)
                 except Exception as e:
                     logger.warning(f"Progress callback error: {e}")
-            
+
             # Delay between batches
             if i + self.BATCH_SIZE < total_users:
                 await asyncio.sleep(self.BATCH_DELAY)

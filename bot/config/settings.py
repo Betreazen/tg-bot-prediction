@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     db_port: int = Field(5432, alias="DB_PORT")
     db_name: str = Field("prediction_bot", alias="DB_NAME")
     db_user: str = Field("prediction_bot", alias="DB_USER")
-    db_password: str = Field("prediction_bot_password", alias="DB_PASSWORD")
+    # No default: the password must be supplied via .env so we never ship a
+    # known credential. docker-compose passes it from the same .env file.
+    db_password: str = Field(..., alias="DB_PASSWORD")
 
     # Scheduler settings
     scheduler_timezone: str = Field("Europe/Moscow", alias="SCHEDULER_TIMEZONE")

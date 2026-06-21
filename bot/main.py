@@ -10,11 +10,15 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config.settings import settings
-from bot.db.session import init_db, close_db
+from bot.db.session import close_db
 from bot.middlewares import DatabaseMiddleware, AdminMiddleware
 from bot.handlers.user import start_router, prediction_router
 from bot.handlers.admin import menu_router, create_router
-from bot.scheduler import setup_scheduler, shutdown_scheduler
+from bot.scheduler import (
+    setup_scheduler,
+    shutdown_scheduler,
+    resume_incomplete_broadcasts,
+)
 
 
 def setup_logging() -> None:
@@ -36,15 +40,23 @@ def setup_logging() -> None:
 async def on_startup(bot: Bot) -> None:
     """Startup handler."""
     logger = logging.getLogger(__name__)
-    
-    # Initialize database
-    await init_db()
-    logger.info("Database initialized")
-    
+
+    # Schema is managed by Alembic migrations (run before the app starts, see
+    # docker-compose command), so we don't create tables here.
+
+    if not settings.admin_ids_list:
+        logger.warning(
+            "ADMIN_IDS is empty — no one can manage the bot. "
+            "Set ADMIN_IDS in your .env file."
+        )
+
     # Setup scheduler
     setup_scheduler(bot)
     logger.info("Scheduler initialized")
-    
+
+    # Resume any broadcasts interrupted by a previous shutdown/crash
+    await resume_incomplete_broadcasts(bot)
+
     # Get bot info
     bot_info = await bot.get_me()
     logger.info(f"Bot started: @{bot_info.username}")

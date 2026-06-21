@@ -1,15 +1,13 @@
 """Statistics service for generating reports."""
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional
+from typing import Dict
 
-import pytz
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import User, UserPredictionChoice, Prediction, PredictionStatus
-from bot.config.settings import settings
+from bot.db.models import User, UserPredictionChoice
+from bot.utils.timezone import now as tz_now
 
 
 @dataclass
@@ -30,71 +28,54 @@ class StatisticsService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.tz = pytz.timezone(settings.scheduler_timezone)
+
+    async def _count_by_button(self, *conditions) -> Dict[int, int]:
+        """Aggregate choices per button in the database (no rows pulled into Python)."""
+        result = await self.session.execute(
+            select(
+                UserPredictionChoice.selected_button,
+                func.count(),
+            )
+            .where(and_(*conditions))
+            .group_by(UserPredictionChoice.selected_button)
+        )
+        return {button: count for button, count in result.all()}
 
     async def get_current_month_statistics(self) -> MonthlyStatistics:
         """Get statistics for the current month."""
-        now = datetime.now(self.tz)
+        now = tz_now()
         year = now.year
         month = now.month
 
-        # Total users
-        total_users_result = await self.session.execute(
-            select(func.count(User.id))
-        )
+        total_users_result = await self.session.execute(select(func.count(User.id)))
         total_users = total_users_result.scalar() or 0
 
-        # Choices this month (excluding test choices)
-        choices_query = select(UserPredictionChoice).where(
-            and_(
-                UserPredictionChoice.year == year,
-                UserPredictionChoice.month == month,
-                UserPredictionChoice.is_test == False,  # noqa: E712
-            )
+        counts = await self._count_by_button(
+            UserPredictionChoice.year == year,
+            UserPredictionChoice.month == month,
+            UserPredictionChoice.is_test.is_(False),
         )
-        choices_result = await self.session.execute(choices_query)
-        choices = list(choices_result.scalars().all())
-
-        # Count active users and button selections
-        active_users = len(choices)
-        button_1_count = sum(1 for c in choices if c.selected_button == 1)
-        button_2_count = sum(1 for c in choices if c.selected_button == 2)
-        button_3_count = sum(1 for c in choices if c.selected_button == 3)
 
         return MonthlyStatistics(
             year=year,
             month=month,
             total_users=total_users,
-            active_users=active_users,
-            button_1_count=button_1_count,
-            button_2_count=button_2_count,
-            button_3_count=button_3_count,
+            active_users=sum(counts.values()),
+            button_1_count=counts.get(1, 0),
+            button_2_count=counts.get(2, 0),
+            button_3_count=counts.get(3, 0),
         )
 
-    async def get_prediction_statistics(
-        self, prediction_id: int
-    ) -> Optional[dict]:
+    async def get_prediction_statistics(self, prediction_id: int) -> dict:
         """Get statistics for a specific prediction."""
-        choices_query = select(UserPredictionChoice).where(
-            and_(
-                UserPredictionChoice.prediction_id == prediction_id,
-                UserPredictionChoice.is_test == False,  # noqa: E712
-            )
+        counts = await self._count_by_button(
+            UserPredictionChoice.prediction_id == prediction_id,
+            UserPredictionChoice.is_test.is_(False),
         )
-        choices_result = await self.session.execute(choices_query)
-        choices = list(choices_result.scalars().all())
-
-        if not choices:
-            return {
-                "total_choices": 0,
-                "button_1_count": 0,
-                "button_2_count": 0,
-                "button_3_count": 0,
-            }
 
         return {
-            "total_choices": len(choices),
-            "button_1_count": sum(1 for c in choices if c.selected_button == 1),
-            "button_2_count": sum(1 for c in choices if c.selected_button == 2),
-            "button_3_count": sum(1 for c in choices if c.selected_button == 3),
+            "total_choices": sum(counts.values()),
+            "button_1_count": counts.get(1, 0),
+            "button_2_count": counts.get(2, 0),
+            "button_3_count": counts.get(3, 0),
         }

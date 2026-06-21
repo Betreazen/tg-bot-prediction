@@ -1,20 +1,20 @@
 """User /start command handler."""
 
-from datetime import datetime
+import logging
 
-import pytz
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config.settings import settings
 from bot.services.user_service import UserService
 from bot.services.prediction_service import PredictionService
 from bot.keyboards.user import get_prediction_keyboard
 from bot.keyboards.admin import get_admin_menu_keyboard
 from bot.db.models import MediaType
+from bot.utils.timezone import now as tz_now
 
+logger = logging.getLogger(__name__)
 router = Router(name="user_start")
 
 
@@ -45,9 +45,8 @@ async def cmd_start(
     
     # Regular user flow
     prediction_service = PredictionService(session)
-    tz = pytz.timezone(settings.scheduler_timezone)
-    now = datetime.now(tz)
-    
+    now = tz_now()
+
     # Check if there's an active prediction
     active_prediction = await prediction_service.get_active_prediction()
     
@@ -94,7 +93,12 @@ async def cmd_start(
                 caption=active_prediction.post_text,
                 reply_markup=keyboard,
             )
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "Failed to send active prediction %s to user %s",
+            active_prediction.id,
+            user_id,
+        )
         await message.answer(
             "❌ Произошла ошибка при отправке предсказания. "
             "Пожалуйста, попробуйте позже."

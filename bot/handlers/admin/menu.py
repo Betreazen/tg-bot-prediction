@@ -1,15 +1,12 @@
 """Admin menu and general handlers."""
 
 import logging
-from datetime import datetime
 
-import pytz
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config.settings import settings
 from bot.services.prediction_service import PredictionService
 from bot.services.statistics_service import StatisticsService
 from bot.services.broadcast_service import BroadcastService
@@ -19,8 +16,9 @@ from bot.keyboards.admin import (
     get_back_keyboard,
 )
 from bot.keyboards.user import get_prediction_keyboard
-from bot.db.models import PredictionStatus, MediaType
-from bot.states.admin import CreatePredictionState
+from bot.db.models import PredictionStatus
+from bot.utils.timezone import get_tz
+from bot.utils.telegram import safe_edit_text
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_menu")
@@ -33,8 +31,9 @@ async def show_admin_menu(
 ) -> None:
     """Show main admin menu."""
     await state.clear()
-    
-    await callback.message.edit_text(
+
+    await safe_edit_text(
+        callback,
         "👋 Панель администратора\n\n"
         "Выберите действие:",
         reply_markup=get_admin_menu_keyboard(),
@@ -56,7 +55,7 @@ async def show_current_prediction(
     text_parts = ["📋 <b>Текущие предсказания</b>\n"]
     
     if active:
-        tz = pytz.timezone(settings.scheduler_timezone)
+        tz = get_tz()
         activated_str = active.activated_at.astimezone(tz).strftime("%d.%m.%Y %H:%M") if active.activated_at else "N/A"
         text_parts.append(
             f"\n<b>🟢 Активное предсказание (ID: {active.id})</b>\n"
@@ -74,7 +73,7 @@ async def show_current_prediction(
         )
     
     if scheduled:
-        tz = pytz.timezone(settings.scheduler_timezone)
+        tz = get_tz()
         scheduled_str = scheduled.scheduled_at.astimezone(tz).strftime("%d.%m.%Y %H:%M")
         text_parts.append(
             f"\n<b>🕐 Запланированное предсказание (ID: {scheduled.id})</b>\n"
@@ -95,11 +94,11 @@ async def show_current_prediction(
         text_parts.append("\n❌ Нет активных или запланированных предсказаний.")
     
     prediction_for_actions = scheduled if scheduled else (active if active and active.status == PredictionStatus.SCHEDULED else None)
-    
-    await callback.message.edit_text(
+
+    await safe_edit_text(
+        callback,
         "".join(text_parts),
         reply_markup=get_prediction_actions_keyboard(prediction_for_actions),
-        parse_mode="HTML",
     )
     await callback.answer()
 
@@ -129,11 +128,7 @@ async def show_statistics(
         f"3️⃣ Кнопка 3: <b>{stats.button_3_count}</b>\n"
     )
     
-    await callback.message.edit_text(
-        text,
-        reply_markup=get_back_keyboard(),
-        parse_mode="HTML",
-    )
+    await safe_edit_text(callback, text, reply_markup=get_back_keyboard())
     await callback.answer()
 
 

@@ -1,14 +1,14 @@
 """Prediction service for managing predictions."""
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
-import pytz
 from sqlalchemy import select, and_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Prediction, PredictionStatus, MediaType, UserPredictionChoice
-from bot.config.settings import settings
+from bot.utils.timezone import get_tz
 
 
 class PredictionService:
@@ -16,7 +16,7 @@ class PredictionService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.tz = pytz.timezone(settings.scheduler_timezone)
+        self.tz = get_tz()
 
     async def get_active_prediction(self) -> Optional[Prediction]:
         """Get the currently active prediction."""
@@ -139,21 +139,51 @@ class PredictionService:
         prediction_id: int,
         selected_button: int,
         is_test: bool = False,
-    ) -> UserPredictionChoice:
-        """Record user's button selection."""
+    ) -> bool:
+        """Atomically record a user's button selection.
+
+        Uses ``INSERT ... ON CONFLICT DO NOTHING`` so two concurrent clicks can
+        never both succeed: the unique constraint on
+        ``(telegram_user_id, year, month)`` decides the winner at the database
+        level without raising. Returns ``True`` if this call recorded the choice,
+        ``False`` if the user had already chosen this month.
+        """
         now = datetime.now(self.tz)
 
-        choice = UserPredictionChoice(
-            telegram_user_id=telegram_user_id,
-            prediction_id=prediction_id,
-            selected_button=selected_button,
-            year=now.year,
-            month=now.month,
-            is_test=is_test,
+        stmt = (
+            pg_insert(UserPredictionChoice)
+            .values(
+                telegram_user_id=telegram_user_id,
+                prediction_id=prediction_id,
+                selected_button=selected_button,
+                year=now.year,
+                month=now.month,
+                is_test=is_test,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_user_prediction_choice_per_month"
+            )
+            .returning(UserPredictionChoice.id)
         )
-        self.session.add(choice)
+        result = await self.session.execute(stmt)
         await self.session.flush()
-        return choice
+        return result.scalar_one_or_none() is not None
+
+    async def get_incomplete_broadcasts(self) -> List[Prediction]:
+        """Return active predictions whose broadcast never finished.
+
+        Used on startup to resume broadcasts interrupted by a crash/restart.
+        """
+        result = await self.session.execute(
+            select(Prediction).where(
+                and_(
+                    Prediction.status == PredictionStatus.ACTIVE,
+                    Prediction.broadcast_started.is_(True),
+                    Prediction.broadcast_completed.is_(False),
+                )
+            )
+        )
+        return list(result.scalars().all())
 
     async def get_current_or_scheduled_prediction(self) -> Optional[Prediction]:
         """Get current active or scheduled prediction for admin view."""

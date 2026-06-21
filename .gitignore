@@ -21,10 +21,15 @@ wheels/
 
 # Virtual environments
 .env
-.venv
+.venv*
 env/
 venv/
 ENV/
+
+# Test/build caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # IDE
 .idea/
