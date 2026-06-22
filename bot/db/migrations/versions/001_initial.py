@@ -24,14 +24,14 @@ def upgrade() -> None:
         'scheduled', 'active', 'cancelled', 'archived',
         name='predictionstatus'
     )
-    prediction_status.create(op.get_bind())
+    prediction_status.create(op.get_bind(), checkfirst=True)
 
     # Create media_type enum
     media_type = postgresql.ENUM(
         'photo', 'gif', 'video', 'animation',
         name='mediatype'
     )
-    media_type.create(op.get_bind())
+    media_type.create(op.get_bind(), checkfirst=True)
 
     # Create users table
     op.create_table(
@@ -50,8 +50,10 @@ def upgrade() -> None:
     op.create_table(
         'predictions',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('status', sa.Enum('scheduled', 'active', 'cancelled', 'archived', name='predictionstatus'), nullable=False),
-        sa.Column('media_type', sa.Enum('photo', 'gif', 'video', 'animation', name='mediatype'), nullable=False),
+        # Types are created explicitly above; reference them without re-creating
+        # (create_type=False) to avoid a duplicate CREATE TYPE on table create.
+        sa.Column('status', postgresql.ENUM('scheduled', 'active', 'cancelled', 'archived', name='predictionstatus', create_type=False), nullable=False),
+        sa.Column('media_type', postgresql.ENUM('photo', 'gif', 'video', 'animation', name='mediatype', create_type=False), nullable=False),
         sa.Column('media_file_id', sa.String(255), nullable=False),
         sa.Column('post_text', sa.Text(), nullable=False),
         sa.Column('button_1_initial', sa.String(64), nullable=False),
