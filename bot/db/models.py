@@ -73,11 +73,19 @@ class Prediction(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     status: Mapped[PredictionStatus] = mapped_column(
-        Enum(PredictionStatus), default=PredictionStatus.SCHEDULED, nullable=False
+        # Store the lowercase enum *values* (e.g. "active"), matching the
+        # Postgres type created by migration 001; SQLAlchemy otherwise stores
+        # the uppercase member names ("ACTIVE"), which the DB type rejects.
+        Enum(PredictionStatus, values_callable=lambda obj: [e.value for e in obj]),
+        default=PredictionStatus.SCHEDULED,
+        nullable=False,
     )
 
     # Media
-    media_type: Mapped[MediaType] = mapped_column(Enum(MediaType), nullable=False)
+    media_type: Mapped[MediaType] = mapped_column(
+        Enum(MediaType, values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+    )
     media_file_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Content
