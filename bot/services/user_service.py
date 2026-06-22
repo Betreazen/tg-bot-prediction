@@ -3,6 +3,7 @@
 from typing import Optional, List
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User
@@ -19,20 +20,22 @@ class UserService:
         """Get existing user or create new one, keeping the admin flag in sync."""
         is_admin = telegram_user_id in settings.admin_ids_list
 
-        user = await self.get_user_by_telegram_id(telegram_user_id)
-        if user:
-            # Keep the stored flag consistent with the current ADMIN_IDS config.
-            if user.is_admin != is_admin:
-                user.is_admin = is_admin
-                await self.session.flush()
-            return user
-
-        user = User(
-            telegram_user_id=telegram_user_id,
-            is_admin=is_admin,
+        # Atomic upsert avoids a check-then-insert race: concurrent /start
+        # updates (each in its own session) would otherwise both INSERT and
+        # the second would hit users_telegram_user_id_key.
+        stmt = (
+            pg_insert(User)
+            .values(telegram_user_id=telegram_user_id, is_admin=is_admin)
+            .on_conflict_do_nothing(index_elements=["telegram_user_id"])
         )
-        self.session.add(user)
+        await self.session.execute(stmt)
         await self.session.flush()
+
+        user = await self.get_user_by_telegram_id(telegram_user_id)
+        # Keep the stored flag consistent with the current ADMIN_IDS config.
+        if user.is_admin != is_admin:
+            user.is_admin = is_admin
+            await self.session.flush()
         return user
 
     async def get_user_by_telegram_id(self, telegram_user_id: int) -> Optional[User]:
