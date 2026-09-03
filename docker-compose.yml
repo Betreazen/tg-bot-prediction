@@ -5,12 +5,20 @@ name: ${COMPOSE_PROJECT_NAME:-tg-bot-prediction}
 
 services:
   bot:
+    mem_limit: 400m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     build: .
     container_name: ${COMPOSE_PROJECT_NAME:-tg-bot-prediction}-bot
     restart: unless-stopped
     env_file:
       - .env
     environment:
+      # glibc резервирует память про запас на каждый поток Python; 2 арены заметно снижают аппетит.
+      - MALLOC_ARENA_MAX=2
       # The bot reaches Postgres over the private compose network, not the host.
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -21,6 +29,14 @@ services:
     command: sh -c "alembic upgrade head && python -m bot.main"
 
   postgres:
+    mem_limit: 300m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Меньше памяти под кэш страниц: у бота база крошечная.
+    command: postgres -c shared_buffers=32MB -c work_mem=2MB
     image: postgres:16-alpine
     container_name: ${COMPOSE_PROJECT_NAME:-tg-bot-prediction}-db
     restart: unless-stopped
