@@ -184,3 +184,7 @@ docker-compose logs -f bot
 ## License
 
 MIT
+
+## Operations
+
+See [deployment, resource limits and rollback](OPERATIONS.md).

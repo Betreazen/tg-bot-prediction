@@ -6,6 +6,7 @@ name: ${COMPOSE_PROJECT_NAME:-tg-bot-prediction}
 services:
   bot:
     mem_limit: 400m
+    memswap_limit: 800m
     logging:
       driver: json-file
       options:
@@ -30,6 +31,7 @@ services:
 
   postgres:
     mem_limit: 300m
+    memswap_limit: 600m
     logging:
       driver: json-file
       options:

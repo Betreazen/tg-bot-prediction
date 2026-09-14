@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from typing import List
+from urllib.parse import quote
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,7 +47,7 @@ class Settings(BaseSettings):
     def database_url(self) -> str:
         """Construct async database URL."""
         return (
-            f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
+            f"postgresql+asyncpg://{quote(self.db_user, safe='')}:{quote(self.db_password, safe='')}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
 
@@ -54,7 +55,7 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         """Construct sync database URL for Alembic."""
         return (
-            f"postgresql://{self.db_user}:{self.db_password}"
+            f"postgresql://{quote(self.db_user, safe='')}:{quote(self.db_password, safe='')}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
 
