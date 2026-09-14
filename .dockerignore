@@ -24,3 +24,15 @@ logs/
 .idea/
 *.md
 !README.md
+
+# Local secrets, tooling and generated artifacts
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.bak
+.qoder/
+.venv/
+.ruff_cache/
+.mypy_cache/
